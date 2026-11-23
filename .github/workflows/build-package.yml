@@ -1,0 +1,60 @@
+name: build package
+
+# Manual artifact builder: compiles the release binaries for the three
+# published targets and uploads them as workflow artifacts named with the
+# given version label. This is not the signed release pipeline; tags,
+# checksum manifests and publication still go through release-octet.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the artifact names (for example 0.10.6.1)"
+        required: true
+        default: "0.10.6.1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-14
+            target: x86_64-apple-darwin
+    env:
+      artifact: octet-${{ inputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@599c45df1a24c1c63ae1129a7e59f46654b8fb66
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Build the release binaries
+        run: cargo build --release --locked --target ${{ matrix.target }} -p octet-coding-agent --bins
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/${artifact}"
+          cp "target/${{ matrix.target }}/release/octet" "dist/${artifact}/"
+          cp "target/${{ matrix.target }}/release/octet-host" "dist/${artifact}/"
+          cp LICENSE "dist/${artifact}/" 2>/dev/null || true
+          tar -czf "dist/${artifact}.tar.gz" -C dist "${artifact}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${artifact}.tar.gz") > "dist/${artifact}.tar.gz.sha256"
+          else
+            (cd dist && shasum -a 256 "${artifact}.tar.gz") > "dist/${artifact}.tar.gz.sha256"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ${{ env.artifact }}
+          path: dist/*
+          if-no-files-found: error
