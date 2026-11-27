@@ -129,18 +129,16 @@ impl HttpError {
                 .provider_code
                 .as_deref()
                 .is_some_and(permanent_provider_code)
-            && matches!(
-                self.status,
-                // Transient status eligibility is not proof of nonacceptance
-                // or zero usage. Callers own request-shape authorization,
-                // finite replacement budgets, and uncertain-usage accounting.
-                http::StatusCode::REQUEST_TIMEOUT
-                    | http::StatusCode::INTERNAL_SERVER_ERROR
-                    | http::StatusCode::TOO_MANY_REQUESTS
-                    | http::StatusCode::BAD_GATEWAY
-                    | http::StatusCode::SERVICE_UNAVAILABLE
-                    | http::StatusCode::GATEWAY_TIMEOUT
-            )
+            && Self::transient_generation_status(self.status)
+    }
+
+    // Pi compatibility: packages/ai/src/utils/retry.ts:47 (fb62c069b).
+    // Status eligibility does not establish nonacceptance or zero usage.
+    pub(crate) fn transient_generation_status(status: http::StatusCode) -> bool {
+        matches!(
+            status.as_u16(),
+            408 | 429 | 500 | 502 | 503 | 504 | 520 | 524 | 525
+        )
     }
 }
 
@@ -249,8 +247,16 @@ pub struct ProviderError {
     pub request_id: Option<String>,
 }
 
+// Pi compatibility: packages/ai/src/utils/retry.ts:49-50 (0888fd79a).
+#[doc(hidden)]
+pub fn mentions_rate_ramp(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .contains("rate increased too quickly")
+}
+
 impl ProviderError {
-    /// Typed code/kind retry veto, independent of provider message text.
+    /// Typed code/kind retry veto, except a slow_down explicitly describing a rate ramp.
     /// Includes pinned Responses overload denials (`server_is_overloaded`,
     /// `slow_down`), not ordinary transient `overloaded_error`.
     pub fn is_permanent(&self) -> bool {
@@ -258,7 +264,10 @@ impl ProviderError {
             .as_deref()
             .into_iter()
             .chain(self.kind.as_deref())
-            .any(permanent_provider_code)
+            .any(|code| {
+                permanent_provider_code(code)
+                    && !(code == "slow_down" && mentions_rate_ramp(&self.message))
+            })
     }
 }
 
@@ -628,6 +637,15 @@ pub struct Diagnostic {
     pub code: String,
     /// Detailed diagnostic message.
     pub message: String,
+}
+
+impl Diagnostic {
+    pub(crate) fn dropped_reasoning_state() -> Self {
+        Self {
+            code: "dropped_reasoning_state".into(),
+            message: "Reasoning cannot be replayed on the target model".into(),
+        }
+    }
 }
 
 #[cfg(test)]

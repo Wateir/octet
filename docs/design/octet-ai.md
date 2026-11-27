@@ -67,6 +67,13 @@ Google's opaque `thoughtSignature` is retained as position-bound
 It is replayed only to the same Google model; transformations to any other model
 or protocol drop it.
 
+Models that advertise `xhigh`, including Gemini 4 Hydrogen and Neon, send
+`thinkingLevel: "XHIGH"` on level-based routes; budget-based routes use the
+`high` token budget. Google prompt blocks report the block reason without safety
+ratings and are not retried. A stream that ends without a candidate finish
+reason or a prompt block reports a missing finish instead. Error finishes such as
+`MISSING_THOUGHT_SIGNATURE` end the turn as `Other` with the original reason.
+
 After pairing function responses, a trailing encoded `model` turn gets a
 wire-only `user` turn containing `Continue.` so continuation requests do not
 attempt unsupported model prefill. Existing user/function-response turns are
@@ -81,7 +88,9 @@ media URLs or forwards audio provider references. Raw PCM16 lacks sample-rate
 metadata and remains unsupported, as does Google audio output. Route-effective
 input format support comes from `Protocol::audio_input_formats` plus the model's
 audio modality. Tool audio follows its paired function response as adjacent
-user media; embedded tool-result media remains unsupported. Cumulative function-call argument
+user media. Gemini 3+ models, including IDs with a vendor prefix, carry tool-call
+IDs, support strict tools, and nest tool-result images inside the corresponding
+function response. Earlier Gemini models send the images as adjacent user media. Cumulative function-call argument
 snapshots are merged before terminal assembly rather than concatenated as invalid
 JSON. Function calls are tracked by provider call ID, not their chunk-local part
 position; ID-less calls receive distinct synthetic IDs. This preserves parallel
@@ -156,7 +165,7 @@ host policy can treat unknown failed terminals separately without broadening
 arbitrary provider-error retry. `ProviderError::is_permanent()` shares typed
 code/kind vetoes with HTTP classification, including policy/quota/context/auth
 errors and pinned Codex `server_is_overloaded` / `slow_down` denials (not generic
-`overloaded_error`). `HttpError::is_transient_server_error()` covers all 5xx,
+`overloaded_error`). A `slow_down` that explicitly reports a rate ramp is transient. `HttpError::is_transient_server_error()` covers all 5xx,
 including 520, with the same veto; it is solely a hint for host-qualified finite
 replacement and does not broaden the legacy `is_safe_to_retry()` whitelist.
 

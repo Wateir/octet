@@ -4,19 +4,19 @@
 
 <a id="binary-availability"></a>
 
-## octet 0.10.6
+## octet 0.10.7
 
-The commands below install the published octet **0.10.6** release.
+The commands below install the published octet **0.10.7** release.
 
 Install the native agent below, then
 [enable the optional Pi adapter](pi-compatibility.md). The
-[release notes](releases/v0.10.6.md) describe changes and known boundaries.
+[release notes](releases/v0.10.7.md) describe changes and known boundaries.
 
 ## Install native binaries
 
-Native v0.10.6 packages target macOS Apple silicon and Intel, GNU/Linux x86-64,
+Native v0.10.7 packages target macOS Apple silicon and Intel, GNU/Linux x86-64,
 and Windows x86-64 (MSVC, preview). Use the version-pinned
-[GitHub release](https://github.com/skaft-software/octet/releases/tag/v0.10.6)
+[GitHub release](https://github.com/skaft-software/octet/releases/tag/v0.10.7)
 for signed assets, exact-source CI and public-install receipts. Use only channels
 recorded as available there; unsigned development artifacts are not a release.
 
@@ -26,17 +26,22 @@ but does not independently verify its Sigstore signature. Native MSVC artifact
 qualification is separate from GNU test builds.
 
 ```powershell
-irm https://github.com/skaft-software/octet/releases/download/v0.10.6/install-octet.ps1 | iex
-octet --version   # octet 0.10.6
+irm https://github.com/skaft-software/octet/releases/download/v0.10.7/install-octet.ps1 | iex
+octet --version   # octet 0.10.7
 ```
 
 On macOS and GNU/Linux:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/skaft-software/octet/releases/download/v0.10.6/install-octet.sh | sh
-octet --version   # octet 0.10.6
+  https://github.com/skaft-software/octet/releases/download/v0.10.7/install-octet.sh | sh
+octet --version   # octet 0.10.7
 ```
+
+On macOS and Linux, the updated installer keeps the verified signature checker in
+`${XDG_CACHE_HOME:-$HOME/.cache}/octet/verifiers`. On later installs and updates,
+it checks the pinned SHA-256 before reuse and checks the working copy again before
+running it. Set `OCTET_INSTALL_NO_CACHE=1` to skip both reading and writing the cache.
 
 When moving from Ygg, install octet afresh. Older installations and data stay
 untouched, and there's no automatic migration. Homebrew, crates.io and SDK
@@ -46,10 +51,10 @@ registries remain separate, unpublished channels. CLI installation with Bun is u
 
 ## Install from npm
 
-**v0.10.6 is published to npm.** Pin the release rather than following a mutable dist-tag:
+**v0.10.7 is published to npm.** Pin the release rather than following a mutable dist-tag:
 
 ```sh
-npm install -g @skaft/octet@0.10.6
+npm install -g @skaft/octet@0.10.7
 octet --version
 ```
 
@@ -114,6 +119,10 @@ installation, provider request, credentials, periodic polling or persistent
 update cache. Proxy-only networks don't get this optional direct-HTTPS startup
 notice.
 
+The check reads the stable tag from GitHub's latest-release redirect without downloading the release page or asset list.
+
+octet 0.10.1 and older can't read the current release metadata; reinstall once with the installer from the [release page](https://github.com/skaft-software/octet/releases/latest).
+
 From 0.7.5 onward, `/changelog` opens the current binary's bundled release notes
 in the TUI as rich Markdown. Up and Down, PageUp and PageDown, Home and End
 scroll, and Escape or Left returns to the input. It works offline and doesn't
@@ -121,7 +130,7 @@ send the notes or the command to the model.
 
 ## Build from a checkout
 
-This checkout targets octet 0.10.6. Check `octet --version`,
+This checkout targets octet 0.10.7. Check `octet --version`,
 and use matching source extension manifests from this checkout. A source build isn't a signed
 release artifact and doesn't replace an installed binary.
 
@@ -146,9 +155,9 @@ need Git for Windows or another Bash-compatible shell.
 
 ## Optional packages
 
-Executable extension bundles are pinned to the host version. The 0.10.6 catalog
+Executable extension bundles are pinned to the host version. The 0.10.7 catalog
 includes six optional bundles, including Pi. Older bundles need their matching
-host; do not reuse a 0.9.6 bundle with octet 0.10.6.
+host; do not reuse a 0.9.6 bundle with octet 0.10.7.
 
 ```sh
 octet extension install octet-web-search
@@ -182,7 +191,7 @@ reference](cli.md#packages).
 | `octet-pi-compat` | [Pi 1.0.2 compatibility adapter](pi-compatibility.md). Enabling the stock bridge automatically mirrors and executes enabled Pi factories with OS permissions; not blanket parity. |
 
 The six source executable-bundle manifests declare API `0.4`, distribution
-version `0.10.6`, and require octet `=0.10.6`. Older bundles stay pinned to their host.
+version `0.10.7`, and require octet `=0.10.7`. Older bundles stay pinned to their host.
 Distribution and host versions are independent boundaries, and an API number
 doesn't bypass the exact host pin. See [current authoring](extensions.md) for
 the Python API 0.4 process recipe and the retained API 0.3 conformance example.

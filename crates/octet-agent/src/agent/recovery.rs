@@ -143,7 +143,43 @@ pub(super) fn retryable_provider_error(error: &octet_ai::ProviderError) -> bool 
         error.message
     )
     .to_ascii_lowercase();
+    // Pi compatibility: packages/ai/src/utils/retry.ts:18-23,65-69 (a00a5048d).
+    // An internal error can wrap a lasting quota denial.
+    if text.contains("quota exceeded") || text.contains("insufficient_quota") {
+        return false;
+    }
+    if octet_ai::error::mentions_rate_ramp(&error.message)
+        || error.kind.as_deref() == Some("api_error")
+        || (error.kind.as_deref() == Some("finish_reason")
+            && error.code.as_deref() == Some("error"))
+    {
+        return true;
+    }
+    // Pi compatibility: packages/ai/src/utils/retry.ts:83-87 (4699b5b26)
+    // and :74-76 (9b88b94e2). Do not match socket codes inside identifiers.
+    if text
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|word| {
+            matches!(
+                word,
+                "econnreset" | "econnaborted" | "econnrefused" | "etimedout" | "epipe"
+            )
+        })
+    {
+        return true;
+    }
     [
+        // Pi compatibility: packages/ai/src/utils/retry.ts:46,122-130,155 (a00a5048d)
+        // and :52-54,123-127 (25190b72c). Temporary unavailability is matched below.
+        "returned an empty response",
+        "stopped before completing the response",
+        "repeat the request later",
+        "admission ceiling",
+        "ended the response before it was complete",
+        "connection to the provider was reset",
+        "reported a failure while generating the response",
+        "connection closed",
+        "connection reset by peer",
         "rate_limit",
         "rate limit",
         "throttl",
@@ -168,9 +204,17 @@ pub(super) fn retryable_stream_start(error: &AiError) -> bool {
     if let AiError::StreamFailure { inner, .. } = error {
         return retryable_stream_start(inner);
     }
-    // No visible output is not proof of nonacceptance. Only a safe connection
-    // failure or an explicit provider rejection can authorize another request.
+    // A dropped body before output may be replaced, but it is not a pre-send
+    // failure: usage_unknown() still charges the attempt's exposure.
     retryable_before_generation(error)
+        || matches!(error, AiError::Transport(transport) if transport.phase == octet_ai::TransportPhase::Body && !transport.timeout)
+        || matches!(
+            error,
+            AiError::StreamProtocol(
+                octet_ai::StreamProtocolError::MissingFinish
+                    | octet_ai::StreamProtocolError::PrematureEof
+            )
+        )
         || matches!(error, AiError::Provider(provider) | AiError::ResponsesFailed(provider) if retryable_provider_error(provider))
 }
 
@@ -816,7 +860,7 @@ pub(super) async fn auxiliary_complete(
     let mut response = None;
     while let Some(event) = stream.next().await {
         if let StreamEvent::Finished(value) = event? {
-            if let Some(error) = incomplete_responses_error(model, &value) {
+            if let Some(error) = terminal_provider_error(model, &value) {
                 return Err(error.into());
             }
             response = Some(value);
@@ -849,21 +893,32 @@ pub(super) async fn auxiliary_compact(
 // Responses maps only unknown response.incomplete reasons to Other. Treat
 // these terminal partial generations like response.failed before any assistant
 // or auxiliary usage commit; known length/filter reasons retain their semantics.
-pub(super) fn incomplete_responses_error(
+pub(super) fn terminal_provider_error(
     model: &Model,
     response: &octet_ai::Response,
 ) -> Option<AiError> {
-    if model.spec.protocol == Protocol::OpenAiResponses {
-        if let StopReason::Other(reason) = &response.stop_reason {
-            return Some(AiError::ResponsesFailed(octet_ai::ProviderError {
+    let StopReason::Other(reason) = &response.stop_reason else {
+        return None;
+    };
+    match model.spec.protocol {
+        Protocol::OpenAiResponses => Some(AiError::ResponsesFailed(octet_ai::ProviderError {
+            code: Some(reason.clone()),
+            kind: None,
+            message: "Responses generation incomplete".into(),
+            request_id: None,
+        })),
+        // Pi compatibility: packages/ai/src/utils/retry.ts:126-132 (4f3d2be9a).
+        // Carry the finish reason itself; provider prose does not decide retryability.
+        Protocol::OpenAiChat if reason == "error" => {
+            Some(AiError::Provider(octet_ai::ProviderError {
                 code: Some(reason.clone()),
-                kind: None,
-                message: "Responses generation incomplete".into(),
+                kind: Some("finish_reason".into()),
+                message: "Provider stopped with an error".into(),
                 request_id: None,
-            }));
+            }))
         }
+        _ => None,
     }
-    None
 }
 
 pub(super) struct ProviderRetryDecision {

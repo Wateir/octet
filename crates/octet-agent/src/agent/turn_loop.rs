@@ -547,6 +547,7 @@ impl Agent {
                     let bounded = !uncertainty_blocks_ceiling(session, max_session_tokens, max_session_cost_microdollars);
                     // A hard ceiling admits a replacement only on bounded exposure.
                     let eligible = provider_retries_enabled
+                        && !recovery.saw_generation
                         && (waiting_for_network || stream_retries < retry_limit)
                         && (bounded || !hard_budget);
                     let host_delay = if waiting_for_network {
@@ -1394,7 +1395,7 @@ impl Agent {
                     if matches!(next, Next::Event(Some(Ok(StreamEvent::Started { .. })))) { native.started(response_stream.response_id()); }
                     let next = match next {
                         Next::Event(Some(Ok(StreamEvent::Finished(response)))) => {
-                            match incomplete_responses_error(&model, &response) {
+                            match terminal_provider_error(&model, &response) {
                                 Some(error) => Next::Event(Some(Err(error))),
                                 None => Next::Event(Some(Ok(StreamEvent::Finished(response)))),
                             }

@@ -119,7 +119,7 @@ pub(crate) fn build_request(model: &Model, req: &Request) -> Result<HttpRequestP
                 }
             }
             Message::Assistant(assistant) => {
-                for part in &assistant.content {
+                for part in assistant.replay_parts(model) {
                     match part {
                         AssistantPart::Text(text) => inputs.push(json!({
                             "object": "entry", "type": "message.output",
@@ -170,7 +170,7 @@ pub(crate) fn build_request(model: &Model, req: &Request) -> Result<HttpRequestP
             // Strict JSON-schema constrained sampling rewrites the function
             // parameters into Mistral's enforced subset; otherwise the
             // canonical schema is sent unchanged.
-            let (parameters, _strict) = crate::constrained_sampling::function_tool_parameters(
+            let (parameters, strict) = crate::constrained_sampling::function_tool_parameters(
                 tool,
                 super::strict_mode_for(model),
             )?;
@@ -179,6 +179,7 @@ pub(crate) fn build_request(model: &Model, req: &Request) -> Result<HttpRequestP
                 "function": {
                     "name": tool.name, "description": tool.description,
                     "parameters": parameters,
+                    "strict": strict,
                 },
             }));
         }

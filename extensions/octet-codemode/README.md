@@ -5,12 +5,12 @@ one Rust executable with the vendored `quickjs-wasi` 3.6.2 engine, Pi's
 `@earendil-works/pi-codemode` 1.0.0 prelude (MIT) and Octet's discovery
 implementation embedded at compile time. **No Node.js and no Python are
 required at runtime**, and no runtime JavaScript is read from the checkout.
-This API `0.4` bundle pins octet `0.10.6`.
+This API `0.4` bundle pins octet `0.10.7`.
 
 ## Install and enable
 
 This bundle joins `extensions/release-catalog.txt`; its release asset is
-`octet-codemode-0.10.6.tar.gz`. With the matching octet host:
+`octet-codemode-0.10.7.tar.gz`. With the matching octet host:
 
 ```sh
 octet extension install octet-codemode
@@ -175,6 +175,13 @@ Note on the reference: the shipped Node/Pi bundle rejects the 0.9.6 feature
 offer (it requires the older key set), so it is measured on the offer it
 accepts, while this extension runs the real 0.9.6 offer. The bundled Pi runtime
 is the behaviour reference, not a claim of bit-identical ECMAScript output.
+
+**Still unmeasured:** Does giving a script the full tool result while sending
+only a short projection to the model reduce tokens or turns on real tasks?
+Compare matched tasks with and without that split, holding the engine, model,
+tools and success criteria fixed. Report `system_tokens`, `tool_result_tokens`,
+turns per task and whether the task succeeded. The runtime timings above do not
+answer this question ([original brief](https://github.com/skaft-software/octet/issues/479)).
 
 ## Persistence, output and limits
 

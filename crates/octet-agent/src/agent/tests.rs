@@ -1726,16 +1726,48 @@ fn idle_session_replacement_updates_the_durable_owner() {
     assert_ne!(agent.resource_owner, first_owner);
 }
 
+fn output_budget_model(url: &str, window: u64) -> Model {
+    let mut model = octet_ai::ModelCatalog::builtin()
+        .unwrap()
+        .resolve(&octet_ai::ModelId("gpt-4o-mini".into()))
+        .unwrap();
+    Arc::make_mut(&mut model.endpoint).base_url = url.parse().unwrap();
+    Arc::make_mut(&mut model.spec).limits.context_window = window;
+    model
+}
+
+#[test]
+fn openrouter_output_leaves_room_for_input_overcount() {
+    let model = output_budget_model("https://openrouter.ai/api/v1/", 1_048_576);
+    for (input, ceiling, expected) in [
+        (220_815, 943_718, 794_638),
+        (220_815, 64_000, 64_000),
+        (912_000, 943_718, 32_768),
+        (1_030_000, 943_718, 14_480),
+    ] {
+        assert_eq!(
+            resolve_request_max_output_tokens(&model, input, ceiling),
+            expected
+        );
+    }
+    let other = output_budget_model("https://example.org/", 1_048_576);
+    assert_eq!(
+        resolve_request_max_output_tokens(&other, 220_815, 943_718),
+        823_665
+    );
+}
+
 #[test]
 fn request_output_uses_provider_ceiling_then_clamps_to_remaining_context() {
+    let model = output_budget_model("http://localhost/", 200_000);
     assert_eq!(
-        resolve_request_max_output_tokens(200_000, 20_000, 65_536),
+        resolve_request_max_output_tokens(&model, 20_000, 65_536),
         65_536
     );
     // The remaining window is 30_000; the reserved headroom is 1% of the
     // window (2_000), so the request never sits on the boundary.
     assert_eq!(
-        resolve_request_max_output_tokens(200_000, 170_000, 65_536),
+        resolve_request_max_output_tokens(&model, 170_000, 65_536),
         28_000
     );
 }
@@ -1748,8 +1780,9 @@ fn request_output_uses_provider_ceiling_then_clamps_to_remaining_context() {
 #[test]
 fn request_output_keeps_estimator_slack_for_a_locally_served_model() {
     let window = 131_072;
+    let model = output_budget_model("http://localhost/", window);
     let estimated_input = 100_176;
-    let requested = resolve_request_max_output_tokens(window, estimated_input, window);
+    let requested = resolve_request_max_output_tokens(&model, estimated_input, window);
     assert_eq!(requested, 29_586);
     // Provider-side counting differences of this size are covered.
     for provider_input in [
@@ -1764,9 +1797,9 @@ fn request_output_keeps_estimator_slack_for_a_locally_served_model() {
     }
     // A prompt that already fills or exceeds the window reserves nothing and
     // cannot fabricate a negative cap.
-    assert_eq!(resolve_request_max_output_tokens(window, window, window), 0);
+    assert_eq!(resolve_request_max_output_tokens(&model, window, window), 0);
     assert_eq!(
-        resolve_request_max_output_tokens(window, window + 5_000, window),
+        resolve_request_max_output_tokens(&model, window + 5_000, window),
         0
     );
     // Small windows keep a proportionate reserve rather than a fixed bite.
@@ -2376,10 +2409,10 @@ fn stream_failure_delegates_classification_to_inner_failure() {
     };
     assert_eq!(ai_error_phase(&disconnect), "response body");
     assert!(!retryable_before_generation(&disconnect));
-    assert!(!retryable_stream_start(&disconnect));
+    assert!(retryable_stream_start(&disconnect));
     assert!(!is_replayable_network_failure(&disconnect));
     assert!(!looks_like_context_error(&disconnect));
-    assert_eq!(provider_retry_limit(&disconnect), 0);
+    assert_eq!(provider_retry_limit(&disconnect), MAX_PROVIDER_RETRIES);
 
     // A stream that ended on a provider 503 frame keeps that frame's
     // retry budget instead of being demoted to the wrapper's behavior.
@@ -2889,7 +2922,7 @@ fn owner_images_come_only_from_accepted_durable_protocol_parts() {
 }
 
 #[test]
-fn ambiguous_stream_endings_have_no_retry_budget_and_actionable_hints() {
+fn ambiguous_stream_endings_have_finite_pre_output_retry_budget_and_actionable_hints() {
     for error in [
         AiError::StreamProtocol(octet_ai::StreamProtocolError::MissingFinish),
         AiError::StreamProtocol(octet_ai::StreamProtocolError::PrematureEof),
@@ -2900,9 +2933,9 @@ fn ambiguous_stream_endings_have_no_retry_budget_and_actionable_hints() {
         }),
     ] {
         assert!(!retryable_before_generation(&error));
-        assert!(!retryable_stream_start(&error));
+        assert!(retryable_stream_start(&error));
         assert!(!is_replayable_network_failure(&error));
-        assert_eq!(provider_retry_limit(&error), 0);
+        assert_eq!(provider_retry_limit(&error), MAX_PROVIDER_RETRIES);
         let diagnostic = public_ai_error_diagnostic(&error, "test", "test");
         assert!(
             diagnostic.contains("Inspect provider state before retrying explicitly"),

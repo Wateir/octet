@@ -166,7 +166,14 @@ fn replacement_taxonomy_only_admits_explicit_transient_boundaries() {
             opened: true,
             exposure: None,
         };
-        assert_eq!(recovery.replacement_limit(), 0);
+        assert_eq!(
+            recovery.replacement_limit(),
+            if saw_generation {
+                0
+            } else {
+                MAX_PROVIDER_RETRIES
+            }
+        );
     }
 }
 
@@ -729,4 +736,84 @@ async fn text_only_video_replay_and_literal_placeholder_share_admission() {
         [1, 1],
         "identical Responses input, retained video vs literal text"
     );
+}
+
+fn frame_error(kind: Option<&str>, message: &str) -> octet_ai::ProviderError {
+    octet_ai::ProviderError {
+        kind: kind.map(str::to_owned),
+        code: None,
+        message: message.into(),
+        request_id: None,
+    }
+}
+
+#[test]
+fn socket_error_frames_retry_only_for_known_words() {
+    for word in [
+        "read ECONNRESET",
+        "write EPIPE",
+        "connect ETIMEDOUT",
+        "ECONNREFUSED",
+        "ECONNABORTED",
+        "Connection closed.",
+        "Connection reset by peer",
+    ] {
+        assert!(retryable_provider_error(&frame_error(None, word)), "{word}");
+    }
+    for word in ["EXECONNRESET", "ETIMEDOUTX", "ERR_EPIPE_ID"] {
+        assert!(
+            !retryable_provider_error(&frame_error(None, word)),
+            "{word}"
+        );
+    }
+}
+
+#[test]
+fn temporary_provider_frames_retry_without_permanent_denials() {
+    for (kind, message) in [
+        (Some("api_error"), "Internal failure"),
+        (None, "Provider returned an empty response"),
+        (None, "The model stopped before completing the response."),
+        (None, "Repeat the request later"),
+        (None, "admission ceiling"),
+        (None, "The provider is temporarily unavailable."),
+        (
+            None,
+            "The provider ended the response before it was complete.",
+        ),
+        (None, "The connection to the provider was reset."),
+        (
+            None,
+            "The provider reported a failure while generating the response.",
+        ),
+    ] {
+        assert!(
+            retryable_provider_error(&frame_error(kind, message)),
+            "{message}"
+        );
+        assert!(!retryable_provider_error(&frame_error(
+            Some("insufficient_quota"),
+            message
+        )));
+    }
+    assert!(!retryable_provider_error(&frame_error(
+        Some("api_error"),
+        "Monthly quota exceeded"
+    )));
+    assert!(!retryable_provider_error(&frame_error(
+        None,
+        "provider unavailable for this model"
+    )));
+}
+
+#[test]
+fn temporary_rate_ramp_retries_even_with_slow_down_code() {
+    for code in [None, Some("slow_down"), Some("insufficient_quota")] {
+        let mut error = frame_error(None, "Your request rate increased too quickly");
+        error.code = code.map(str::to_owned);
+        assert_eq!(
+            retryable_provider_error(&error),
+            code != Some("insufficient_quota")
+        );
+    }
 }

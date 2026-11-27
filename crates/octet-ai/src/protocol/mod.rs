@@ -6,6 +6,23 @@ use crate::error::{AiError, ConfigError};
 use crate::stream::{ResponseBuilder, StreamEvent};
 use crate::types::{CacheCompatibility, CacheRetention, Request};
 
+impl crate::Model {
+    /// Output room after the estimated input and the caller's safety margin.
+    pub fn output_room_for_estimate(&self, input_tokens: u64, fixed_margin: u64) -> u64 {
+        let remaining = self.spec.limits.context_window.saturating_sub(input_tokens);
+        let fixed_room = remaining.saturating_sub(fixed_margin);
+        if self.endpoint.base_url.host_str() != Some("openrouter.ai") {
+            return fixed_room;
+        }
+
+        // Pi packages/ai/src/api/simple-options.ts:28-34 (0a4fad548): reserve
+        // 15% of estimated input for OpenRouter's tokenizer overcount. Near a
+        // full window, allow up to 32K output without eating the fixed margin.
+        let margin = (u128::from(input_tokens) * 15).div_ceil(100) as u64;
+        fixed_room.min(remaining.saturating_sub(margin).max(32_768))
+    }
+}
+
 /// Wire cache-control marker shared by Anthropic and compatible endpoints.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub(crate) struct CacheControl {
@@ -113,8 +130,8 @@ pub(crate) mod sse;
 /// Pi's per-API `supportsStrictMode` default with a model's explicit
 /// declaration applied.
 ///
-/// Responses defaults off except Azure/Codex; Google and Mistral default on;
-/// Anthropic and Bedrock default off. Public OpenAI Chat accepts strict tools,
+/// Responses defaults off except Azure/Codex; Google depends on the model;
+/// Anthropic, Bedrock and Mistral default off. Public OpenAI Chat accepts strict tools,
 /// but unknown compatible Chat endpoints do not inherit that guarantee. A model
 /// preset may override the route default in either direction.
 pub(crate) fn strict_mode_for(model: &crate::catalog::Model) -> bool {
@@ -147,10 +164,17 @@ pub(crate) fn strict_mode_for(model: &crate::catalog::Model) -> bool {
     if model.spec.protocol == Protocol::AnthropicMessages {
         return anthropic_strict_tools_for(model);
     }
-    if model.spec.protocol == Protocol::BedrockConverse {
+    // Pi packages/ai/src/api/mistral-conversations.ts:532-534 (2c2a77f9f):
+    // strict tools can stall Mistral Large 4 before a call.
+    if matches!(
+        model.spec.protocol,
+        Protocol::BedrockConverse | Protocol::MistralConversations
+    ) {
         return false;
     }
-    // Google, Mistral and future routes retain their existing defaults.
+    if model.spec.protocol == Protocol::GoogleGenerativeAi {
+        return google::gemini_3_or_later(&model.spec.api_name);
+    }
     true
 }
 

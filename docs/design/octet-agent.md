@@ -112,7 +112,7 @@ fail closed. The codec/transport owns wire facts and socket retirement; the
 agent alone owns autonomous replacement policy.
 
 Qualified unknown `response.failed` and `response.incomplete` reasons (before
-assistant persistence), transient provider `server_error`/internal/unavailable
+user-visible output), transient provider `server_error`/internal/unavailable
 errors,
 body interruptions, codec-annotated provider-frame JSON failures, HTTP 408, and
 terminal EOF errors permit at most **eleven stream replacements** per logical
@@ -138,7 +138,7 @@ request failures do not qualify. Only codec-owned `StreamFailure` wrapping
 raw decode errors do not. Typed `ResponsesFailed` provenance authorizes unknown
 qualified terminal errors, not arbitrary `Provider` errors. Explicit permanent
 provider codes outrank retry- or context-sounding messages, including policy,
-auth, quota, `server_is_overloaded`, and `slow_down` denials. The counter survives re-preparation and WebSocket-to-HTTP fallback;
+auth, quota, `server_is_overloaded`, and `slow_down` denials without rate-ramp wording. The counter survives re-preparation and WebSocket-to-HTTP fallback;
 it resets only on a completed assistant response. The failed stream is dropped
 before hooks, compaction, waiting, or opening another attempt. Remote cancellation
 and exactly-once provider charges are not promised.
@@ -153,8 +153,8 @@ shortened. `set_max_network_wait(Some(duration))` bounds elapsed outage recovery
 for embedding hosts; it does not extend external job/child deadlines. Ordinary
 cancellation remains level-triggered and wins same-poll races.
 
-`ProviderRetry` invalidates all provisional text, reasoning, media and tool
-presentation owned by the failed attempt. `ProviderWaitingForNetwork` represents
+Main-request recovery stops once text, reasoning, media or a tool call has streamed.
+Auxiliary requests do not stream output to the user. `ProviderWaitingForNetwork` represents
 unbounded-count pre-send waiting without a fictional retry denominator. Both
 leave the run, session, accepted controls, and children alive. Controls are
 received during main-request backoff; replacement re-enters the existing safe
@@ -166,7 +166,7 @@ JSON null, and its kind is `waiting_for_network`; qualified inference replacemen
 uses `interrupted_inference`. `ProviderRetryContext.operation` is the typed
 auxiliary operation, or `None` (JSON null) for a main assistant request. Hooks
 receive the owning run/resource identity and cannot shorten host/provider delay.
-Post-generation `rate_limit_exceeded` is retryable on the qualified route, with
+Before output, `rate_limit_exceeded` is retryable on the qualified route, with
 Codex-style "try again in" seconds/milliseconds hints honored; permanent quota,
 usage-not-included and request codes remain excluded.
 

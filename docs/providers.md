@@ -80,7 +80,7 @@ configuration below.
 
 See [Getting started](getting-started.md#3-choose-one-provider-lane) and the
 [CLI alternatives](cli.md#provider-setup). This setup flow is part of octet
-0.10.6; availability in older published versions differs.
+0.10.7; availability in older published versions differs.
 
 ## Cloud setup
 
@@ -614,6 +614,9 @@ A pinned models.dev supplement fills in what a provider's model list leaves out:
 only models that built-in discovery actually returns, and it's looked up per
 provider. It never supplies tool or structured-output flags or reasoning
 controls, and it never replaces a value the endpoint states.
+The supplement skips Groq models marked deprecated and omits the retired OpenAI
+and Azure `gpt-5-chat-latest` and Mistral `devstral-medium-latest` and `pixtral-12b`
+IDs, as well as Mistral’s undocumented `mistral-medium-3.5` alias.
 
 <details>
 <summary>How the supplement and its live refresh work</summary>
@@ -875,6 +878,15 @@ structured output, output limits and reasoning. Google uses native
 translation. Knowing a protocol doesn't imply [native audio
 support](media.md#formats-and-limits).
 
+When a tool prefers strict JSON-schema sampling but has an untyped node (such
+as `items: {}` or a bare `const`), octet sends that tool's original schema
+without strict sampling. Other tools keep their own strict settings. A tool
+that requires strict sampling fails locally instead. An `enum` or `anyOf` node
+doesn't need a separate `type`.
+
+Chat Completions sends instructions as `system` on compatible hosts such as Groq.
+Only reasoning models on `api.openai.com` can receive the `developer` role.
+
 Codex inference uses ordinary Responses with `parallel_tool_calls: true`, like
 Pi. Explicit Responses Lite selection by an `octet-ai` SDK caller still sends
 `parallel_tool_calls: false`. Host execution is independent of the wire flag:
@@ -940,13 +952,14 @@ Pi. Explicit Responses Lite selection by an `octet-ai` SDK caller still sends
 The [WebSocket code](../crates/octet-ai/src/responses_ws.rs) and the [recovery
 notes](tools.md#recovery-and-security) tell a recognized pre-generation
 connection-lifetime rejection (retire the socket, retry safely over HTTP) from
-an accepted POST or a body disconnect. By default, ambiguous accepted requests
-aren't replayed, even before visible output. The agent has a narrow exception
-for host-qualified Codex Responses requests (including Lite) with local function
-tools: before assistant commit it may discard provisional output and replace
-interrupted inference from durable context. That can duplicate remote generation
-and incur unknown charges, and it doesn't replay committed local tool effects or
-prove remote cancellation. The agent keeps finite streamed-inference replacement
+an accepted POST or a body disconnect. A stream that drops before any text, reasoning, media
+or tool call arrives can be retried, as can transient socket errors and HTTP
+520, 524 or 525. Temporary provider and gateway errors, including Anthropic
+`api_error`, upstream empty responses, queue admission ceilings and Chat
+Completions `finish_reason: "error"`, follow the same pre-output rule. So do throttles that say
+the request rate increased too quickly, including `slow_down` with that wording. Once output has started, the agent reports the interruption
+instead of repeating it. A fresh request can still duplicate remote work and
+incur unknown charges even when nothing was shown. The agent keeps finite streamed-inference replacement
 and HTTP-admission retry budgets separate, without resetting on transport
 fallback. They bound attempts, not confirmed accepted generations or charges,
 and eligibility and hard ceilings can stop recovery earlier.
@@ -1057,6 +1070,9 @@ resolver.
 <a id="native-mistral-conversations-unreleased-codec"></a>
 
 ## Native Mistral Conversations (experimental codec)
+
+Mistral Conversations sends tools in non-strict mode by default, leaving
+optional parameters optional. This avoids delays before tool calls on Mistral Large 4.
 
 The native Conversations codec passes its deterministic request and SSE
 fixtures, including rejection of credential-bearing or non-TLS destinations
